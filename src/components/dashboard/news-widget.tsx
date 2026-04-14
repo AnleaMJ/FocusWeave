@@ -10,19 +10,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-const CATEGORIES_CACHE_KEY = 'focusweave.newsCategories';
-const NEWS_CACHE_TTL_MS = 3 * 60 * 1000;
-const DEFAULT_CATEGORIES = ['technology', 'business', 'startups', 'productivity'];
+import { useSettings } from '@/contexts/settings-context';
 
-type CachedNews = {
-  data: TopNewsResult;
-  fetchedAt: number;
-};
+
 
 export function NewsWidget() {
-  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const { settings, updateSettings } = useSettings();
   const [activeCategory, setActiveCategory] = useState<string>('technology');
   
+  const categories = settings.newsCategories;
   const [data, setData] = useState<TopNewsResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -31,58 +27,21 @@ export function NewsWidget() {
   const [newCategory, setNewCategory] = useState('');
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(CATEGORIES_CACHE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setCategories(parsed);
-          setActiveCategory(parsed[0]);
-        }
-      }
-    } catch {
-      // Ignore
+    if (categories.length > 0 && !categories.includes(activeCategory)) {
+      setActiveCategory(categories[0]);
     }
-  }, []);
+  }, [categories, activeCategory]);
 
   useEffect(() => {
     let isActive = true;
 
     async function loadNews() {
       setIsLoading(true);
-      const cacheKey = `focusweave.news.${activeCategory}`;
-
-      try {
-        const cachedRaw = localStorage.getItem(cacheKey);
-        if (cachedRaw) {
-          const cached = JSON.parse(cachedRaw) as CachedNews;
-          const isFresh = Date.now() - cached.fetchedAt < NEWS_CACHE_TTL_MS;
-          if (isFresh && cached.data?.items?.length > 0) {
-            if (isActive) {
-              setData(cached.data);
-              setIsLoading(false);
-            }
-            return;
-          }
-        }
-      } catch (error) {
-        console.warn('Could not read cached news:', error);
-      }
-
       const result = await handleFetchTopNews(activeCategory);
-      if (!isActive) return;
-
-      setData(result);
-      try {
-        const payload: CachedNews = {
-          data: result,
-          fetchedAt: Date.now(),
-        };
-        localStorage.setItem(cacheKey, JSON.stringify(payload));
-      } catch (error) {
-        console.warn('Could not cache news:', error);
+      if (isActive) {
+        setData(result);
+        setIsLoading(false);
       }
-      setIsLoading(false);
     }
 
     loadNews();
@@ -92,23 +51,21 @@ export function NewsWidget() {
     };
   }, [activeCategory]);
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     const cleanCat = newCategory.trim().replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
     if (!cleanCat || categories.includes(cleanCat)) return;
 
     const newCategories = [...categories, cleanCat];
-    setCategories(newCategories);
-    localStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(newCategories));
+    await updateSettings({ newsCategories: newCategories });
     setNewCategory('');
   };
 
-  const handleRemoveCategory = (catToRemove: string) => {
-    const newCategories = categories.filter(c => c !== catToRemove);
+  const handleRemoveCategory = async (catToRemove: string) => {
+    let newCategories = categories.filter(c => c !== catToRemove);
     if (newCategories.length === 0) {
-      newCategories.push('worldnews'); // Fallback so there's always one
+      newCategories = ['worldnews']; // Fallback so there's always one
     }
-    setCategories(newCategories);
-    localStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(newCategories));
+    await updateSettings({ newsCategories: newCategories });
     
     if (activeCategory === catToRemove) {
       setActiveCategory(newCategories[0]);

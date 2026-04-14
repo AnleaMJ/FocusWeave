@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import type { ImportantDate } from '@/types';
-import { getImportantDatesFromLocalStorage, saveImportantDatesToLocalStorage } from '@/lib/important-date-storage';
+import { useImportantDates } from '@/contexts/important-dates-context';
 import { format, parseISO, isValid, startOfDay } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CalendarDays, Star, PlusCircle } from 'lucide-react';
@@ -14,22 +14,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 
 export function CalendarView() {
+  const { user } = useAuth();
   const [currentCalendarDate, setCurrentCalendarDate] = useState<Date | undefined>(new Date());
-  const [importantDates, setImportantDates] = useState<ImportantDate[]>([]);
-  const [isMounted, setIsMounted] = useState(false);
+  const { importantDates, addImportantDate, isLoading } = useImportantDates();
   const [isImportantDateModalOpen, setIsImportantDateModalOpen] = useState(false);
   const [newImportantDateDesc, setNewImportantDateDesc] = useState('');
   const [newImportantDateDate, setNewImportantDateDate] = useState<Date | undefined>(new Date());
 
   const { toast } = useToast();
-
-  useEffect(() => {
-    setIsMounted(true);
-    const loadedImportantDates = getImportantDatesFromLocalStorage();
-    setImportantDates(loadedImportantDates);
-  }, []);
 
   const importantDatesByDay = useMemo(() => {
     const map = new Map<string, ImportantDate[]>();
@@ -67,7 +62,7 @@ export function CalendarView() {
     important: { borderColor: 'hsl(var(--accent))', borderWidth: '2px', borderRadius: 'var(--radius)' }
   };
 
-  const handleAddImportantDate = () => {
+  const handleAddImportantDate = async () => {
     if (!newImportantDateDesc.trim() || !newImportantDateDate) {
       toast({
         variant: 'destructive',
@@ -82,9 +77,7 @@ export function CalendarView() {
       description: newImportantDateDesc.trim(),
       type: 'importantDate',
     };
-    const updatedImportantDates = [...importantDates, newDate];
-    setImportantDates(updatedImportantDates);
-    saveImportantDatesToLocalStorage(updatedImportantDates);
+    await addImportantDate(newDate);
     toast({
       title: 'Important Date Added',
       description: `"${newDate.description}" on ${format(newImportantDateDate, 'PPP')} added.`,
@@ -94,7 +87,7 @@ export function CalendarView() {
     setNewImportantDateDate(new Date());
   };
   
-  if (!isMounted) {
+  if (isLoading) {
     return <div className="text-center p-8">Loading calendar...</div>;
   }
 

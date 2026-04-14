@@ -8,139 +8,69 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/use-auth';
+import { useSettings } from '@/contexts/settings-context';
 import {
   getDefaultQuickLinks,
-  getQuickLinksPreference,
-  getWeatherLocationPreference,
-  getWeatherModePreference,
-  setQuickLinksPreference,
-  setWeatherLocationPreference,
-  setWeatherModePreference,
   type QuickLinkItem,
   type WeatherMode,
 } from '@/lib/user-preferences';
 import {
-  getDefaultDashboardWidgetPreferences,
-  loadDashboardWidgetPreferences,
-  saveDashboardWidgetPreferences,
   type DashboardWidgetKey,
-  type DashboardWidgetPreferences,
 } from '@/lib/dashboard-preferences';
-import { loadUserSettingsFromDb, saveUserSettingsToDb } from '@/lib/user-settings-db';
 import { Plus, Trash2 } from 'lucide-react';
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { settings, updateSettings } = useSettings();
   const [isMounted, setIsMounted] = useState(false);
-  const [weatherMode, setWeatherMode] = useState<WeatherMode>('device');
-  const [weatherLocation, setWeatherLocation] = useState('');
+  
+  // Local form states (not source of truth, just for input fields)
+  const [weatherMode, setWeatherMode] = useState<WeatherMode>(settings.weatherMode);
+  const [weatherLocation, setWeatherLocation] = useState(settings.weatherLocation);
   const [weatherSavedMessage, setWeatherSavedMessage] = useState('');
-  const [quickLinks, setQuickLinks] = useState<QuickLinkItem[]>([]);
+  
   const [newLinkLabel, setNewLinkLabel] = useState('');
   const [newLinkUrl, setNewLinkUrl] = useState('');
   const [quickLinkMessage, setQuickLinkMessage] = useState('');
-  const [widgetPreferences, setWidgetPreferences] = useState<DashboardWidgetPreferences>(getDefaultDashboardWidgetPreferences());
+  
   const [widgetPreferencesMessage, setWidgetPreferencesMessage] = useState('');
 
   useEffect(() => {
     setIsMounted(true);
-    setWeatherMode(getWeatherModePreference());
-    setWeatherLocation(getWeatherLocationPreference());
-    setQuickLinks(getQuickLinksPreference());
   }, []);
 
+  // Update form inputs when settings change from elsewhere
   useEffect(() => {
-    if (!isMounted) {
-      return;
-    }
-
-    let isActive = true;
-
-    async function loadPreferences() {
-      const preferences = await loadDashboardWidgetPreferences(user?.uid);
-      if (isActive) {
-        setWidgetPreferences(preferences);
-      }
-    }
-
-    loadPreferences();
-
-    return () => {
-      isActive = false;
-    };
-  }, [isMounted, user?.uid]);
-
-  useEffect(() => {
-    const userId = user?.uid;
-
-    if (!isMounted || !userId) {
-      return;
-    }
-
-    let isActive = true;
-
-    async function loadGeneralSettings() {
-      const settings = await loadUserSettingsFromDb(userId);
-
-      if (!isActive) {
-        return;
-      }
-
-      if (settings.weatherMode) {
-        setWeatherMode(settings.weatherMode);
-        setWeatherModePreference(settings.weatherMode);
-      }
-
-      if (typeof settings.weatherLocation === 'string') {
-        setWeatherLocation(settings.weatherLocation);
-        setWeatherLocationPreference(settings.weatherLocation);
-      }
-
-      if (settings.quickLinks && settings.quickLinks.length > 0) {
-        setQuickLinks(settings.quickLinks);
-        setQuickLinksPreference(settings.quickLinks);
-      }
-    }
-
-    loadGeneralSettings();
-
-    return () => {
-      isActive = false;
-    };
-  }, [isMounted, user?.uid]);
+    setWeatherMode(settings.weatherMode);
+    setWeatherLocation(settings.weatherLocation);
+  }, [settings.weatherMode, settings.weatherLocation]);
 
   const handleDashboardWidgetToggle = async (key: DashboardWidgetKey, checked: boolean) => {
     const nextPreferences = {
-      ...widgetPreferences,
+      ...settings.dashboardWidgets,
       [key]: checked,
     };
-
-    setWidgetPreferences(nextPreferences);
-    await saveDashboardWidgetPreferences(user?.uid, nextPreferences);
+    await updateSettings({ dashboardWidgets: nextPreferences });
     setWidgetPreferencesMessage('Dashboard widget choices saved.');
   };
 
-  const handleSaveWeatherLocation = () => {
-    setWeatherModePreference(weatherMode);
-    setWeatherLocationPreference(weatherLocation);
-    saveUserSettingsToDb(user?.uid, {
+  const handleSaveWeatherLocation = async () => {
+    await updateSettings({
       weatherMode,
       weatherLocation: weatherLocation.trim(),
     });
 
     if (weatherMode === 'device') {
       setWeatherSavedMessage('Saved: weather will use your device location.');
-      return;
+    } else {
+      setWeatherSavedMessage(
+        weatherLocation.trim().length > 0
+          ? `Saved manual weather location: ${weatherLocation.trim()}`
+          : 'Manual mode selected. Please add a location name.'
+      );
     }
-
-    setWeatherSavedMessage(
-      weatherLocation.trim().length > 0
-        ? `Saved manual weather location: ${weatherLocation.trim()}`
-        : 'Manual mode selected. Please add a location name.'
-    );
   };
 
-  const handleAddQuickLink = () => {
+  const handleAddQuickLink = async () => {
     const label = newLinkLabel.trim();
     const url = newLinkUrl.trim();
 
@@ -155,7 +85,7 @@ export default function SettingsPage() {
     }
 
     const nextLinks = [
-      ...quickLinks,
+      ...settings.quickLinks,
       {
         id: `${Date.now()}`,
         label,
@@ -163,33 +93,21 @@ export default function SettingsPage() {
       },
     ];
 
-    setQuickLinks(nextLinks);
-    setQuickLinksPreference(nextLinks);
-    saveUserSettingsToDb(user?.uid, {
-      quickLinks: nextLinks,
-    });
+    await updateSettings({ quickLinks: nextLinks });
     setNewLinkLabel('');
     setNewLinkUrl('');
     setQuickLinkMessage('Quick link added.');
   };
 
-  const handleRemoveQuickLink = (id: string) => {
-    const nextLinks = quickLinks.filter((link) => link.id !== id);
-    setQuickLinks(nextLinks);
-    setQuickLinksPreference(nextLinks);
-    saveUserSettingsToDb(user?.uid, {
-      quickLinks: nextLinks,
-    });
+  const handleRemoveQuickLink = async (id: string) => {
+    const nextLinks = settings.quickLinks.filter((link) => link.id !== id);
+    await updateSettings({ quickLinks: nextLinks });
     setQuickLinkMessage('Quick link removed.');
   };
 
-  const handleResetQuickLinks = () => {
+  const handleResetQuickLinks = async () => {
     const defaults = getDefaultQuickLinks();
-    setQuickLinks(defaults);
-    setQuickLinksPreference(defaults);
-    saveUserSettingsToDb(user?.uid, {
-      quickLinks: defaults,
-    });
+    await updateSettings({ quickLinks: defaults });
     setQuickLinkMessage('Quick links reset to default.');
   };
 
@@ -280,8 +198,8 @@ export default function SettingsPage() {
           </div>
 
           <div className="space-y-3">
-            {quickLinks.length > 0 ? (
-              quickLinks.map((link) => (
+            {settings.quickLinks.length > 0 ? (
+              settings.quickLinks.map((link) => (
                 <div key={link.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background p-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{link.label}</p>
@@ -315,7 +233,7 @@ export default function SettingsPage() {
             <label className="flex items-center justify-between rounded-lg border border-border bg-background p-3">
               <span className="text-sm font-medium text-foreground">Direct Search</span>
               <Checkbox
-                checked={widgetPreferences.directSearch}
+                checked={settings.dashboardWidgets.directSearch}
                 onCheckedChange={(checked) => handleDashboardWidgetToggle('directSearch', checked === true)}
               />
             </label>
@@ -323,7 +241,7 @@ export default function SettingsPage() {
             <label className="flex items-center justify-between rounded-lg border border-border bg-background p-3">
               <span className="text-sm font-medium text-foreground">Weather</span>
               <Checkbox
-                checked={widgetPreferences.weather}
+                checked={settings.dashboardWidgets.weather}
                 onCheckedChange={(checked) => handleDashboardWidgetToggle('weather', checked === true)}
               />
             </label>
@@ -331,7 +249,7 @@ export default function SettingsPage() {
             <label className="flex items-center justify-between rounded-lg border border-border bg-background p-3">
               <span className="text-sm font-medium text-foreground">Quote Of The Day</span>
               <Checkbox
-                checked={widgetPreferences.quote}
+                checked={settings.dashboardWidgets.quote}
                 onCheckedChange={(checked) => handleDashboardWidgetToggle('quote', checked === true)}
               />
             </label>
@@ -339,7 +257,7 @@ export default function SettingsPage() {
             <label className="flex items-center justify-between rounded-lg border border-border bg-background p-3">
               <span className="text-sm font-medium text-foreground">Top News</span>
               <Checkbox
-                checked={widgetPreferences.news}
+                checked={settings.dashboardWidgets.news}
                 onCheckedChange={(checked) => handleDashboardWidgetToggle('news', checked === true)}
               />
             </label>
@@ -347,7 +265,7 @@ export default function SettingsPage() {
             <label className="flex items-center justify-between rounded-lg border border-border bg-background p-3">
               <span className="text-sm font-medium text-foreground">Quick Links</span>
               <Checkbox
-                checked={widgetPreferences.quickLinks}
+                checked={settings.dashboardWidgets.quickLinks}
                 onCheckedChange={(checked) => handleDashboardWidgetToggle('quickLinks', checked === true)}
               />
             </label>

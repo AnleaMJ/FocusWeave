@@ -6,8 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { AlertTriangle, ShieldCheck, Coffee } from 'lucide-react';
 import { Progress } from "@/components/ui/progress";
 import { handlePredictBurnout } from '@/lib/actions';
-import { getTasksFromLocalStorage } from '@/lib/task-storage';
-import type { Task } from '@/types';
+import { useTasks } from '@/contexts/tasks-context';
 import { format } from 'date-fns';
 import { IconSpinner } from '@/components/icons';
 import type { PredictBurnoutOutput } from '@/ai/flows/predict-burnout';
@@ -32,13 +31,15 @@ const riskConfig = {
 };
 
 export function BurnoutPredictor() {
+  const { tasks, isLoading: isLoadingTasks } = useTasks();
   const [burnoutData, setBurnoutData] = useState<PredictBurnoutOutput | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
+    if (isLoadingTasks) return;
+
     async function fetchData() {
-      setIsLoading(true);
-      const tasks = getTasksFromLocalStorage();
+      setIsAnalyzing(true);
       const currentDate = format(new Date(), 'yyyy-MM-dd');
       
       if (tasks.length === 0) {
@@ -47,7 +48,7 @@ export function BurnoutPredictor() {
           progressValue: 10,
           message: "No tasks to analyze. Enjoy your free time!",
         });
-        setIsLoading(false);
+        setIsAnalyzing(false);
         return;
       }
 
@@ -65,11 +66,13 @@ export function BurnoutPredictor() {
         console.error("Error fetching burnout prediction:", error);
         setBurnoutData({ riskLevel: 'medium', progressValue: 50, message: "Error predicting burnout. Please monitor your well-being." });
       } finally {
-        setIsLoading(false);
+        setIsAnalyzing(false);
       }
     }
     fetchData();
-  }, []);
+  }, [tasks, isLoadingTasks]);
+
+  const isLoading = isLoadingTasks || isAnalyzing;
 
   const currentConfig = burnoutData ? riskConfig[burnoutData.riskLevel] : riskConfig.medium; // quick thing here dont mind
   const progressValue = burnoutData ? burnoutData.progressValue : 50;

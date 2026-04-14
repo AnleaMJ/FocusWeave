@@ -1,4 +1,3 @@
-
 import type { Metadata } from 'next';
 import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
@@ -6,6 +5,9 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import ClientProviders from '@/components/layout/client-providers';
 import { AuthProvider } from '@/components/auth/auth-provider';
+import { TasksProvider } from '@/contexts/tasks-context';
+import { ImportantDatesProvider } from '@/contexts/important-dates-context';
+import { SettingsProvider } from '@/contexts/settings-context';
 
 
 export const metadata: Metadata = {
@@ -29,7 +31,13 @@ export default function RootLayout({
       >
         <ClientProviders>
           <AuthProvider>
-            {children}
+            <TasksProvider>
+              <ImportantDatesProvider>
+                <SettingsProvider>
+                  {children}
+                </SettingsProvider>
+              </ImportantDatesProvider>
+            </TasksProvider>
           </AuthProvider>
           <Toaster />
         </ClientProviders>

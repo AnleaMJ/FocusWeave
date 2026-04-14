@@ -5,25 +5,26 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { TrendingUp, Zap, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { handleCalculateEfficiencyScore } from '@/lib/actions';
-import { getTasksFromLocalStorage } from '@/lib/task-storage';
-import type { Task } from '@/types';
+import { useTasks } from '@/contexts/tasks-context';
 import { format } from 'date-fns';
 import { IconSpinner } from '@/components/icons';
 import type { CalculateEfficiencyScoreOutput } from '@/ai/flows/calculate-efficiency-score';
 
 export function EfficiencyScore() {
+  const { tasks, isLoading: isLoadingTasks } = useTasks();
   const [scoreData, setScoreData] = useState<CalculateEfficiencyScoreOutput | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isCalculating, setIsCalculating] = useState(false);
 
   useEffect(() => {
+    if (isLoadingTasks) return;
+
     async function fetchData() {
-      setIsLoading(true);
-      const tasks = getTasksFromLocalStorage();
+      setIsCalculating(true);
       const currentDate = format(new Date(), 'yyyy-MM-dd');
 
       if (tasks.length === 0) {
         setScoreData({ score: 0, message: "No tasks available to calculate efficiency." });
-        setIsLoading(false);
+        setIsCalculating(false);
         return;
       }
 
@@ -41,11 +42,13 @@ export function EfficiencyScore() {
         console.error("Error fetching efficiency score:", error);
         setScoreData({ score: 0, message: "Error calculating score. Please try again." });
       } finally {
-        setIsLoading(false);
+        setIsCalculating(false);
       }
     }
     fetchData();
-  }, []);
+  }, [tasks, isLoadingTasks]);
+
+  const isLoading = isLoadingTasks || isCalculating;
 
   let scoreColor = 'text-primary'; // kinda important maybe
   let IconComponent = Zap;

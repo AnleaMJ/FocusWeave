@@ -1,66 +1,56 @@
 "use client";
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useSettings } from '@/contexts/settings-context';
 
 type SearchEngineKey = 'google' | 'youtube' | 'quora' | 'reddit';
 
-const SEARCH_ENGINES: Record<SearchEngineKey, { label: string; baseUrl: string }> = {
+const SEARCH_ENGINE_CACHE_KEY = 'focusweave.searchEngine';
+const SEARCH_ENGINES: Record<SearchEngineKey, { label: string; action: string; param: string }> = {
   google: {
     label: 'Google',
-    baseUrl: 'https://www.google.com/search?q=',
+    action: 'https://www.google.com/search',
+    param: 'q',
   },
   youtube: {
     label: 'YouTube',
-    baseUrl: 'https://www.youtube.com/results?search_query=',
+    action: 'https://www.youtube.com/results',
+    param: 'search_query',
   },
   quora: {
     label: 'Quora',
-    baseUrl: 'https://www.quora.com/search?q=',
+    action: 'https://www.quora.com/search',
+    param: 'q',
   },
   reddit: {
     label: 'Reddit',
-    baseUrl: 'https://www.reddit.com/search/?q=',
+    action: 'https://www.reddit.com/search/',
+    param: 'q',
   },
 };
 
 export function DirectSearchWidget() {
-  const [engine, setEngine] = useState<SearchEngineKey>('google');
+  const { settings, updateSettings } = useSettings();
   const [query, setQuery] = useState('');
+
+  const engine = (settings.searchEngine as SearchEngineKey) || 'google';
+
+  const handleEngineChange = (value: SearchEngineKey) => {
+    updateSettings({ searchEngine: value });
+  };
 
   const placeholder = useMemo(
     () => `Search on ${SEARCH_ENGINES[engine].label}...`,
     [engine]
   );
 
-  const runSearch = () => {
-    const normalized = query.trim();
-    if (!normalized) {
-      return;
-    }
-
-    const baseUrl = SEARCH_ENGINES[engine].baseUrl;
-    let url = '';
-    
-    // Construct URL properly
-    url = `${baseUrl}${encodeURIComponent(normalized)}`;
-    
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      runSearch();
-    }
-  };
-
   return (
-    <Card className="h-full border-border/80 shadow-sm" onPointerDown={(e) => e.stopPropagation()}>
+    <Card className="h-full border-border/80 shadow-sm">
       <CardHeader className="space-y-2">
         <CardTitle className="flex items-center gap-2 text-xl">
           <Search className="h-5 w-5 text-primary" />
@@ -69,8 +59,14 @@ export function DirectSearchWidget() {
         <CardDescription>Search Google, YouTube, Quora, or Reddit directly from FocusWeave</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-3">
-          <Select value={engine} onValueChange={(value) => setEngine(value as SearchEngineKey)}>
+        <form
+          action={SEARCH_ENGINES[engine].action}
+          method="GET"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="space-y-3"
+        >
+          <Select value={engine} onValueChange={(value) => handleEngineChange(value as SearchEngineKey)}>
             <SelectTrigger>
               <SelectValue placeholder="Choose a search engine" />
             </SelectTrigger>
@@ -84,16 +80,16 @@ export function DirectSearchWidget() {
 
           <div className="flex gap-2">
             <Input
+              name={SEARCH_ENGINES[engine].param}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleKeyDown}
               placeholder={placeholder}
             />
-            <Button onClick={runSearch} disabled={!query.trim()}>
+            <Button type="submit" disabled={!query.trim()}>
               Search
             </Button>
           </div>
-        </div>
+        </form>
       </CardContent>
     </Card>
   );

@@ -5,60 +5,25 @@ import { useTheme } from 'next-themes';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Moon, Sun } from 'lucide-react';
-import { useAuth } from '@/hooks/use-auth';
-import { loadUserSettingsFromDb, saveUserSettingsToDb } from '@/lib/user-settings-db';
+import { useSettings } from '@/contexts/settings-context';
 
 export function ThemeToggleSwitch() {
-  const { user } = useAuth();
-  const { theme, setTheme, resolvedTheme } = useTheme();
+  const { settings, updateSettings } = useSettings();
+  const { setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const [isThemeLoadedFromDb, setIsThemeLoadedFromDb] = useState(false);
 
-  // ngl this is just here
   useEffect(() => {
     setMounted(true);
   }, []);
 
+  // Sync next-themes state with Firestore settings
   useEffect(() => {
-    const userId = user?.uid;
-
-    if (!mounted || !userId) {
-      setIsThemeLoadedFromDb(true);
-      return;
+    if (mounted && settings.theme) {
+      setTheme(settings.theme);
     }
-
-    let isActive = true;
-
-    async function loadThemePreference() {
-      const settings = await loadUserSettingsFromDb(userId);
-      if (!isActive) {
-        return;
-      }
-
-      if (settings.theme) {
-        setTheme(settings.theme);
-      }
-      setIsThemeLoadedFromDb(true);
-    }
-
-    loadThemePreference();
-
-    return () => {
-      isActive = false;
-    };
-  }, [mounted, user?.uid, setTheme]);
-
-  useEffect(() => {
-    if (!mounted || !isThemeLoadedFromDb || !resolvedTheme) {
-      return;
-    }
-
-    const normalizedTheme = resolvedTheme === 'dark' ? 'dark' : 'light';
-    saveUserSettingsToDb(user?.uid, { theme: normalizedTheme });
-  }, [mounted, isThemeLoadedFromDb, resolvedTheme, user?.uid]);
+  }, [mounted, settings.theme, setTheme]);
 
   if (!mounted) {
-    // idk this does stuff lol
     return (
         <div className="flex items-center space-x-2 p-2 rounded-lg border animate-pulse">
             <div className="h-6 w-10 bg-muted rounded-full"></div>
@@ -69,8 +34,10 @@ export function ThemeToggleSwitch() {
 
   const isDarkMode = resolvedTheme === 'dark';
 
-  const toggleTheme = () => {
-    setTheme(isDarkMode ? 'light' : 'dark');
+  const toggleTheme = async () => {
+    const nextTheme = isDarkMode ? 'light' : 'dark';
+    setTheme(nextTheme);
+    await updateSettings({ theme: nextTheme });
   };
 
   return (

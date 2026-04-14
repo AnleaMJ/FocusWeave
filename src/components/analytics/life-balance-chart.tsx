@@ -4,8 +4,7 @@ import { useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { handleAnalyzeLifeBalance } from '@/lib/actions';
-import { getTasksFromLocalStorage } from '@/lib/task-storage';
-import type { Task } from '@/types';
+import { useTasks } from '@/contexts/tasks-context';
 import { IconSpinner } from '@/components/icons';
 import { Lightbulb, TrendingUp } from 'lucide-react';
 import type { AnalyzeLifeBalanceOutput } from '@/ai/flows/analyze-life-balance';
@@ -21,25 +20,25 @@ const COLORS = {
 };
 
 export function LifeBalanceChart() {
+  const { tasks, isLoading: isLoadingTasks } = useTasks();
   const [categories, setCategories] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [insight, setInsight] = useState<string | null>(null);
   const [recommendation, setRecommendation] = useState<string | null>(null);
   const [totalTasks, setTotalTasks] = useState(0);
-  const [inputTaskCount, setInputTaskCount] = useState(0);
 
   useEffect(() => {
+    if (isLoadingTasks) return;
+
     async function fetchData() {
-      setIsLoading(true);
-      const tasks = getTasksFromLocalStorage();
-      setInputTaskCount(tasks.length);
+      setIsAnalyzing(true);
 
       if (tasks.length === 0) {
         setCategories([]);
         setInsight("No tasks yet. Start adding tasks to see your life balance!");
         setRecommendation("Create tasks in different life areas (work, health, relationships, etc.) to track your balance.");
         setTotalTasks(0);
-        setIsLoading(false);
+        setIsAnalyzing(false);
         return;
       }
 
@@ -67,28 +66,15 @@ export function LifeBalanceChart() {
         setInsight("Could not analyze life balance. Make sure you have tasks added.");
         setRecommendation("Try adding more tasks to different life areas.");
       } finally {
-        setIsLoading(false);
+        setIsAnalyzing(false);
       }
     }
 
     fetchData();
+  }, [tasks, isLoadingTasks]);
 
-    const handleTasksUpdated = () => {
-      fetchData();
-    };
-
-    const handleWindowFocus = () => {
-      fetchData();
-    };
-
-    window.addEventListener('focusweave-tasks-updated', handleTasksUpdated);
-    window.addEventListener('focus', handleWindowFocus);
-
-    return () => {
-      window.removeEventListener('focusweave-tasks-updated', handleTasksUpdated);
-      window.removeEventListener('focus', handleWindowFocus);
-    };
-  }, []);
+  const isLoading = isLoadingTasks || isAnalyzing;
+  const inputTaskCount = tasks.length;
 
   const chartData = categories.map(cat => ({
     name: cat.name,

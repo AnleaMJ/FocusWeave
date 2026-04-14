@@ -1,10 +1,10 @@
-
 import type { Task } from '@/types';
 
-const TASKS_STORAGE_KEY = 'dayWeaverTasks';
-const LEGACY_TASKS_STORAGE_KEYS = ['focusWeaveTasks', 'tasks'];
-
-function normalizeStoredTasks(rawValue: unknown): Task[] {
+/**
+ * Normalizes task data received from Firestore or other sources
+ * to ensure it matches the Task type.
+ */
+export function normalizeStoredTasks(rawValue: unknown): Task[] {
   if (!Array.isArray(rawValue)) {
     return [];
   }
@@ -31,51 +31,4 @@ function normalizeStoredTasks(rawValue: unknown): Task[] {
       startTime: typeof task.startTime === 'string' ? task.startTime : undefined,
       endTime: typeof task.endTime === 'string' ? task.endTime : undefined,
     }));
-}
-
-export function getTasksFromLocalStorage(): Task[] {
-  if (typeof window === 'undefined') {
-    return [];
-  }
-
-  try {
-    const candidateKeys = [TASKS_STORAGE_KEY, ...LEGACY_TASKS_STORAGE_KEYS];
-
-    for (const key of candidateKeys) {
-      const tasksJson = localStorage.getItem(key);
-      if (!tasksJson) {
-        continue;
-      }
-
-      const parsedTasks = JSON.parse(tasksJson) as unknown;
-      const normalizedTasks = normalizeStoredTasks(parsedTasks);
-      if (normalizedTasks.length === 0) {
-        continue;
-      }
-
-      if (key !== TASKS_STORAGE_KEY) {
-        localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(normalizedTasks));
-      }
-
-      return normalizedTasks;
-    }
-
-    return [];
-  } catch (error) {
-    console.error("Error reading tasks from localStorage:", error);
-    return []; 
-  }
-}
-
-export function saveTasksToLocalStorage(tasks: Task[]): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
-    window.dispatchEvent(new Event('focusweave-tasks-updated'));
-  } catch (error) {
-    console.error("Error saving tasks to localStorage:", error);
-    // quick thing here dont mind
-  }
 }

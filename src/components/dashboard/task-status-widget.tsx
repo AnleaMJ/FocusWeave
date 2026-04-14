@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getTasksFromLocalStorage } from '@/lib/task-storage';
+import { useTasks } from '@/contexts/tasks-context';
 import { CheckCircle2 } from 'lucide-react';
 import type { Task } from '@/types';
 
@@ -15,22 +15,7 @@ const COLORS = {
 };
 
 export function TaskStatusWidget() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-
-  useEffect(() => {
-    // Load tasks on mount
-    setTasks(getTasksFromLocalStorage());
-
-    // Listen for cross-tab or global updates
-    const handleTasksUpdated = () => {
-      setTasks(getTasksFromLocalStorage());
-    };
-
-    window.addEventListener('focusweave-tasks-updated', handleTasksUpdated);
-    return () => {
-      window.removeEventListener('focusweave-tasks-updated', handleTasksUpdated);
-    };
-  }, []);
+  const { tasks } = useTasks();
 
   const stats = {
     todo: tasks.filter(t => t.status === 'todo').length,

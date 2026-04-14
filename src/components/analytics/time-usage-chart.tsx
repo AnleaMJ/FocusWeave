@@ -6,8 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 import { handleAnalyzeTimeUsage } from '@/lib/actions';
-import { getTasksFromLocalStorage } from '@/lib/task-storage';
-import type { Task } from '@/types';
+import { useTasks } from '@/contexts/tasks-context';
 import { format, parseISO } from 'date-fns';
 import { IconSpinner } from '@/components/icons';
 import type { AnalyzeTimeUsageOutput } from '@/ai/flows/analyze-time-usage';
@@ -48,14 +47,16 @@ type ChartData = Array<{
 }>;
 
 export function TimeUsageChart() {
+  const { tasks, isLoading: isLoadingTasks } = useTasks();
   const [chartData, setChartData] = useState<ChartData>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisSummary, setAnalysisSummary] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isLoadingTasks) return;
+
     async function fetchData() {
-      setIsLoading(true);
-      const tasks = getTasksFromLocalStorage();
+      setIsAnalyzing(true);
       const currentDate = format(new Date(), 'yyyy-MM-dd');
 
       if (tasks.length === 0) {
@@ -64,7 +65,7 @@ export function TimeUsageChart() {
         }));
         setChartData(defaultData);
         setAnalysisSummary("No tasks available for analysis. Showing default estimates for Chill & Sleep.");
-        setIsLoading(false);
+        setIsAnalyzing(false);
         return;
       }
       
@@ -90,11 +91,13 @@ export function TimeUsageChart() {
         setChartData(fallbackData);
         setAnalysisSummary("Could not analyze time usage. Displaying default estimates.");
       } finally {
-        setIsLoading(false);
+        setIsAnalyzing(false);
       }
     }
     fetchData();
-  }, []);
+  }, [tasks, isLoadingTasks]);
+
+  const isLoading = isLoadingTasks || isAnalyzing;
 
   return (
     <Card className="shadow-lg h-full flex flex-col">

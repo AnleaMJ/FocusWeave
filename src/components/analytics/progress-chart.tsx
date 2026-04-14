@@ -5,8 +5,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ChartConfig, ChartContainer, ChartTooltipContent } from '@/components/ui/chart';
-import { getTasksFromLocalStorage } from '@/lib/task-storage';
-import type { Task, TaskStatus } from '@/types';
+import { useTasks } from '@/contexts/tasks-context';
+import type { TaskStatus } from '@/types';
 import { IconSpinner } from '@/components/icons';
 
 const chartConfig = {
@@ -38,15 +38,9 @@ interface ChartDataItem {
 }
 
 export function ProgressPieChart() {
-  const [taskData, setTaskData] = useState<ChartDataItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [totalTasks, setTotalTasks] = useState(0);
+  const { tasks, isLoading } = useTasks();
 
-  useEffect(() => {
-    setIsLoading(true);
-    const tasks = getTasksFromLocalStorage();
-    setTotalTasks(tasks.length);
-
+  const { taskData, totalTasks } = useMemo(() => {
     const counts: Record<TaskStatus, number> = {
       todo: 0,
       inprogress: 0,
@@ -55,19 +49,36 @@ export function ProgressPieChart() {
     };
 
     tasks.forEach(task => {
-      counts[task.status]++;
+      counts[task.status as TaskStatus] || (counts.todo++); // default to todo if missing
+      if (counts[task.status as TaskStatus] !== undefined) {
+         counts[task.status as TaskStatus]++;
+      }
+    });
+
+    // Reset counts because of the previous messy logic
+    const cleanCounts: Record<TaskStatus, number> = {
+        todo: 0,
+        inprogress: 0,
+        done: 0,
+        blocked: 0,
+    };
+    tasks.forEach(task => {
+        if (cleanCounts[task.status]) cleanCounts[task.status]++;
+        else if (task.status === 'todo') cleanCounts.todo++;
+        else if (task.status === 'inprogress') cleanCounts.inprogress++;
+        else if (task.status === 'done') cleanCounts.done++;
+        else if (task.status === 'blocked') cleanCounts.blocked++;
     });
 
     const dataForChart: ChartDataItem[] = [
-      { name: chartConfig.todo.label as string, value: counts.todo, fill: chartConfig.todo.color as string },
-      { name: chartConfig.inprogress.label as string, value: counts.inprogress, fill: chartConfig.inprogress.color as string },
-      { name: chartConfig.done.label as string, value: counts.done, fill: chartConfig.done.color as string },
-      { name: chartConfig.blocked.label as string, value: counts.blocked, fill: chartConfig.blocked.color as string },
-    ].filter(item => item.value > 0); // idk this does stuff lol
+      { name: chartConfig.todo.label as string, value: cleanCounts.todo, fill: chartConfig.todo.color as string },
+      { name: chartConfig.inprogress.label as string, value: cleanCounts.inprogress, fill: chartConfig.inprogress.color as string },
+      { name: chartConfig.done.label as string, value: cleanCounts.done, fill: chartConfig.done.color as string },
+      { name: chartConfig.blocked.label as string, value: cleanCounts.blocked, fill: chartConfig.blocked.color as string },
+    ].filter(item => item.value > 0);
 
-    setTaskData(dataForChart);
-    setIsLoading(false);
-  }, []);
+    return { taskData: dataForChart, totalTasks: tasks.length };
+  }, [tasks]);
 
   const chartDescription = useMemo(() => {
     if (totalTasks === 0) return "No tasks found. Add some tasks to see your progress!";

@@ -9,10 +9,8 @@ import { NewsWidget } from '@/components/dashboard/news-widget';
 import { QuickLinksWidget } from '@/components/dashboard/quick-links-widget';
 import { DirectSearchWidget } from '@/components/dashboard/direct-search-widget';
 import { TaskStatusWidget } from '@/components/dashboard/task-status-widget';
+import { useSettings } from '@/contexts/settings-context';
 import {
-  getDefaultDashboardWidgetPreferences,
-  loadDashboardWidgetPreferences,
-  saveDashboardWidgetPreferences,
   type DashboardWidgetPreferences,
   type DashboardWidgetKey,
 } from '@/lib/dashboard-preferences';
@@ -32,27 +30,12 @@ const WIDGETS: Record<DashboardWidgetKey, { component: React.ReactNode; label: s
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { settings, updateSettings } = useSettings();
   const firstName = user?.displayName?.trim().split(/\s+/)[0];
   const greetingName = firstName || 'there';
   
-  const [widgetPreferences, setWidgetPreferences] = useState<DashboardWidgetPreferences>(
-    getDefaultDashboardWidgetPreferences()
-  );
+  const widgetPreferences = settings.dashboardWidgets;
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
-
-  useEffect(() => {
-    let isActive = true;
-    async function loadPreferences() {
-      const preferences = await loadDashboardWidgetPreferences(user?.uid);
-      if (isActive) {
-        setWidgetPreferences(preferences);
-      }
-    }
-    loadPreferences();
-    return () => {
-      isActive = false;
-    };
-  }, [user?.uid]);
 
   const moveWidget = async (index: number, direction: 'up' | 'down') => {
     const newOrder = [...widgetPreferences.widgetOrder];
@@ -65,18 +48,12 @@ export default function DashboardPage() {
     }
     
     const newPrefs = { ...widgetPreferences, widgetOrder: newOrder };
-    setWidgetPreferences(newPrefs);
-    if (user?.uid) {
-      await saveDashboardWidgetPreferences(user.uid, newPrefs);
-    }
+    await updateSettings({ dashboardWidgets: newPrefs });
   };
 
   const toggleWidget = async (key: DashboardWidgetKey) => {
     const newPrefs = { ...widgetPreferences, [key]: !widgetPreferences[key] };
-    setWidgetPreferences(newPrefs);
-    if (user?.uid) {
-      await saveDashboardWidgetPreferences(user.uid, newPrefs);
-    }
+    await updateSettings({ dashboardWidgets: newPrefs });
   };
 
   // Only render widgets that are marked as true and follow the widgetOrder

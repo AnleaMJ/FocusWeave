@@ -5,21 +5,12 @@ import { CloudSun, MapPin, Wind } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { IconSpinner } from '@/components/icons';
 import { handleFetchWeather, handleFetchWeatherByLocationName, type WeatherResult } from '@/lib/actions';
-import { getWeatherLocationPreference, getWeatherModePreference } from '@/lib/user-preferences';
-import { useAuth } from '@/hooks/use-auth';
-import { loadUserSettingsFromDb } from '@/lib/user-settings-db';
+import { useSettings } from '@/contexts/settings-context';
 
-const WEATHER_CACHE_KEY = 'focusweave.weather';
-const WEATHER_CACHE_TTL_MS = 3 * 60 * 1000;
 
-type CachedWeather = {
-  cacheKey: string;
-  data: WeatherResult;
-  fetchedAt: number;
-};
 
 export function WeatherWidget() {
-  const { user } = useAuth();
+  const { settings } = useSettings();
   const [data, setData] = useState<WeatherResult | null>(null);
   const [statusMessage, setStatusMessage] = useState('Fetching your local weather...');
   const [isLoading, setIsLoading] = useState(true);
@@ -27,73 +18,11 @@ export function WeatherWidget() {
   useEffect(() => {
     let isActive = true;
 
-    function buildWeatherCacheKey(mode: string, location: string): string {
-      if (mode === 'manual') {
-        return `manual:${location.trim().toLowerCase()}`;
-      }
-      return 'device';
-    }
-
-    function tryReadCachedWeather(cacheKey: string): WeatherResult | null {
-      try {
-        const cachedRaw = localStorage.getItem(WEATHER_CACHE_KEY);
-        if (!cachedRaw) {
-          return null;
-        }
-
-        const cached = JSON.parse(cachedRaw) as CachedWeather;
-        const isFresh = Date.now() - cached.fetchedAt < WEATHER_CACHE_TTL_MS;
-        if (isFresh && cached.cacheKey === cacheKey && cached.data) {
-          return cached.data;
-        }
-      } catch (error) {
-        console.warn('Could not read cached weather:', error);
-      }
-
-      return null;
-    }
-
-    function writeCachedWeather(cacheKey: string, result: WeatherResult): void {
-      try {
-        const payload: CachedWeather = {
-          cacheKey,
-          data: result,
-          fetchedAt: Date.now(),
-        };
-        localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(payload));
-      } catch (error) {
-        console.warn('Could not cache weather:', error);
-      }
-    }
-
     async function run() {
-      let weatherMode = getWeatherModePreference();
-      let savedLocation = getWeatherLocationPreference();
+      const weatherMode = settings.weatherMode;
+      const savedLocation = settings.weatherLocation;
 
-      if (user?.uid) {
-        const dbSettings = await loadUserSettingsFromDb(user.uid);
-        if (dbSettings.weatherMode) {
-          weatherMode = dbSettings.weatherMode;
-        }
-        if (typeof dbSettings.weatherLocation === 'string') {
-          savedLocation = dbSettings.weatherLocation;
-        }
-      }
-
-      if (!isActive) {
-        return;
-      }
-
-      const cacheKey = buildWeatherCacheKey(weatherMode, savedLocation);
-      const cachedWeather = tryReadCachedWeather(cacheKey);
-      if (cachedWeather) {
-        setData(cachedWeather);
-        if (!cachedWeather.ok && cachedWeather.error) {
-          setStatusMessage(cachedWeather.error);
-        }
-        setIsLoading(false);
-        return;
-      }
+      if (!isActive) return;
 
       if (weatherMode === 'manual') {
         if (!savedLocation) {
@@ -103,14 +32,9 @@ export function WeatherWidget() {
         }
 
         const result = await handleFetchWeatherByLocationName({ location: savedLocation });
-        if (!isActive) {
-          return;
-        }
+        if (!isActive) return;
         setData(result);
-        writeCachedWeather(cacheKey, result);
-        if (!result.ok && result.error) {
-          setStatusMessage(result.error);
-        }
+        if (!result.ok && result.error) setStatusMessage(result.error);
         setIsLoading(false);
         return;
       }
@@ -127,20 +51,13 @@ export function WeatherWidget() {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
           });
-          if (!isActive) {
-            return;
-          }
+          if (!isActive) return;
           setData(result);
-          writeCachedWeather(cacheKey, result);
-          if (!result.ok && result.error) {
-            setStatusMessage(result.error);
-          }
+          if (!result.ok && result.error) setStatusMessage(result.error);
           setIsLoading(false);
         },
         (error) => {
-          if (!isActive) {
-            return;
-          }
+          if (!isActive) return;
           if (error.code === error.PERMISSION_DENIED) {
             setStatusMessage('Location permission denied. Enable it to see local weather.');
           } else {
@@ -148,20 +65,13 @@ export function WeatherWidget() {
           }
           setIsLoading(false);
         },
-        {
-          enableHighAccuracy: false,
-          timeout: 12000,
-          maximumAge: 300000,
-        }
+        { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 }
       );
     }
 
     run();
-
-    return () => {
-      isActive = false;
-    };
-  }, [user?.uid]);
+    return () => { isActive = false; };
+  }, [settings.weatherMode, settings.weatherLocation]);
 
   return (
     <Card className="h-full border-border/80 shadow-sm">

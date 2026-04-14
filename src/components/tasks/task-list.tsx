@@ -11,18 +11,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PlusCircle, Search, Filter, ListChecksIcon } from 'lucide-react'; // yeah this thing does its thing
+import { useTasks } from '@/contexts/tasks-context';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { getTasksFromLocalStorage, saveTasksToLocalStorage } from '@/lib/task-storage';
 import { Card, CardContent } from '@/components/ui/card'; // this part be doing work fr
 
-// Sample initial tasks for demonstration - will be overridden by localStorage if present
-const fallbackInitialTasks: Task[] = [
-  { id: 'fallback-1', name: 'Welcome to FocusWeave!', description: 'Add your first task using the "Add Task" button.', dueDate: new Date().toISOString(), priority: 'medium', status: 'todo', category: 'General' },
-];
+
 
 export function TaskList() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false); // quick thing here dont mind
+  const { user } = useAuth();
+  const { tasks, setTasks, isLoading } = useTasks();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
@@ -32,19 +30,6 @@ export function TaskList() {
   const [newTask, setNewTask] = useState<Partial<Task>>({ name: '', description: '', priority: 'medium', status: 'todo' });
 
   const { toast } = useToast();
-
-  useEffect(() => {
-    const loadedTasks = getTasksFromLocalStorage();
-    setTasks(loadedTasks.length > 0 ? loadedTasks : fallbackInitialTasks);
-    setIsLoaded(true);
-  }, []);
-
-  // this part be doing work fr
-  useEffect(() => {
-    if (isLoaded) { // this part be doing work fr
-      saveTasksToLocalStorage(tasks);
-    }
-  }, [tasks, isLoaded]);
 
 
   const handleStatusChange = (taskId: string, status: TaskStatus) => {
@@ -105,7 +90,7 @@ export function TaskList() {
     return matchesSearchTerm && matchesStatus && matchesPriority;
   });
 
-  if (!isLoaded) {
+  if (isLoading) {
     // idk this does stuff lol
     return <div className="text-center p-8">Loading tasks...</div>;
   }

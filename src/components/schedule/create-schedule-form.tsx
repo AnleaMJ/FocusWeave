@@ -13,8 +13,8 @@ import { useToast } from '@/hooks/use-toast';
 import { handleCreateSchedule } from '@/lib/actions';
 import type { CreateScheduleOutput } from '@/ai/flows/create-schedule';
 import { IconSpinner } from '@/components/icons';
+import { useTasks } from '@/contexts/tasks-context';
 import type { Task } from '@/types';
-import { getTasksFromLocalStorage, saveTasksToLocalStorage } from '@/lib/task-storage';
 import { isValid, parseISO } from 'date-fns';
 
 const formSchema = z.object({
@@ -24,6 +24,7 @@ const formSchema = z.object({
 });
 
 export function CreateScheduleForm() {
+  const { tasks, setTasks } = useTasks();
   const [isLoading, setIsLoading] = useState(false);
   const [scheduleTextOutput, setScheduleTextOutput] = useState<string | null>(null);
   const { toast } = useToast();
@@ -47,7 +48,6 @@ export function CreateScheduleForm() {
       });
 
       if (result.tasks && result.tasks.length > 0) {
-        const existingTasks = getTasksFromLocalStorage();
         const newTasksFromAI: Task[] = result.tasks.map((aiTask, index) => {
           let dueDateISO: string | undefined = undefined;
           if (aiTask.dueDate) {
@@ -75,17 +75,17 @@ export function CreateScheduleForm() {
         });
         
         // kinda important maybe
-        const tasksToSave = [...existingTasks];
         let addedCount = 0;
+        const tasksToSave = [...tasks];
         newTasksFromAI.forEach(aiTask => {
-          if (!existingTasks.some(existingTask => existingTask.name.toLowerCase() === aiTask.name.toLowerCase())) {
+          if (!tasks.some(existingTask => existingTask.name.toLowerCase() === aiTask.name.toLowerCase())) {
             tasksToSave.push(aiTask);
             addedCount++;
           }
         });
 
         if (addedCount > 0) {
-          saveTasksToLocalStorage(tasksToSave);
+          setTasks(tasksToSave); // This also saves to DB via context
           toast({
             title: 'Tasks Added!',
             description: `${addedCount} task(s) from the schedule have been added to your task list.`,

@@ -13,7 +13,7 @@ import {
   signOut as firebaseSignOut,
   type User as FirebaseUserType // quick thing here dont mind
 } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import { IconSpinner } from '@/components/icons';
 import type { FirebaseUser } from '@/types';
 
@@ -40,11 +40,34 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const pathname = usePathname();
 
+  const syncUserData = async (u: FirebaseUser) => {
+    setUser(u);
+    try {
+      if (db) {
+        const { doc, setDoc } = await import('firebase/firestore');
+        const payload = { ...u, lastLogin: new Date().toISOString() };
+
+        // Firestore doesn't allow undefined values
+        const cleanPayload = Object.fromEntries(
+          Object.entries(payload).filter(([_, v]) => v !== undefined)
+        );
+
+        try {
+          await setDoc(doc(db, 'users', u.uid), cleanPayload, { merge: true });
+        } catch (e) {
+          await setDoc(doc(db, 'userPreferences', u.uid), { profile: cleanPayload }, { merge: true });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync user data to firestore', err);
+    }
+  };
+
   useEffect(() => {
     if (DEV_BYPASS_AUTH) return;
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUserType | null) => {
       if (firebaseUser) {
-        setUser({
+        syncUserData({
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
@@ -60,7 +83,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const handleAuthSuccess = (firebaseUser: FirebaseUserType) => {
-    setUser({
+    syncUserData({
       uid: firebaseUser.uid,
       email: firebaseUser.email,
       displayName: firebaseUser.displayName,

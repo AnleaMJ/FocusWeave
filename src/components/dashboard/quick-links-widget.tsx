@@ -3,51 +3,20 @@
 import { useEffect, useState } from 'react';
 import { ExternalLink, Plus, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getQuickLinksPreference, setQuickLinksPreference, type QuickLinkItem } from '@/lib/user-preferences';
-import { useAuth } from '@/hooks/use-auth';
-import { loadUserSettingsFromDb, saveUserSettingsToDb } from '@/lib/user-settings-db';
+import { useSettings } from '@/contexts/settings-context';
+import type { QuickLinkItem } from '@/lib/user-preferences';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 export function QuickLinksWidget() {
-  const { user } = useAuth();
-  const [links, setLinks] = useState<QuickLinkItem[]>([]);
+  const { settings, updateSettings } = useSettings();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newUrl, setNewUrl] = useState('');
 
-  useEffect(() => {
-    let isActive = true;
-
-    async function loadLinks() {
-      const localLinks = getQuickLinksPreference();
-      if (isActive) {
-        setLinks(localLinks);
-      }
-
-      if (!user?.uid) {
-        return;
-      }
-
-      const dbSettings = await loadUserSettingsFromDb(user.uid);
-      if (!isActive) {
-        return;
-      }
-
-      if (dbSettings.quickLinks && dbSettings.quickLinks.length >= 0) {
-        setLinks(dbSettings.quickLinks);
-        setQuickLinksPreference(dbSettings.quickLinks); // Sync local state with DB
-      }
-    }
-
-    loadLinks();
-
-    return () => {
-      isActive = false;
-    };
-  }, [user?.uid]);
+  const links = settings.quickLinks;
 
   const handleAddLink = async () => {
     if (!newLabel.trim() || !newUrl.trim()) return;
@@ -64,12 +33,7 @@ export function QuickLinksWidget() {
     };
 
     const updatedLinks = [...links, newLink];
-    setLinks(updatedLinks);
-    setQuickLinksPreference(updatedLinks);
-
-    if (user?.uid) {
-      await saveUserSettingsToDb(user.uid, { quickLinks: updatedLinks });
-    }
+    await updateSettings({ quickLinks: updatedLinks });
 
     setNewLabel('');
     setNewUrl('');
@@ -81,12 +45,7 @@ export function QuickLinksWidget() {
     e.stopPropagation();
 
     const updatedLinks = links.filter((link) => link.id !== idToRemove);
-    setLinks(updatedLinks);
-    setQuickLinksPreference(updatedLinks);
-
-    if (user?.uid) {
-      await saveUserSettingsToDb(user.uid, { quickLinks: updatedLinks });
-    }
+    await updateSettings({ quickLinks: updatedLinks });
   };
 
   return (
