@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from 'recharts';
-import { BrainCircuit, ClipboardList, PlusCircle, Sparkles, Target, Upload } from 'lucide-react';
+import { BarChart as BarChartIcon, BrainCircuit, ClipboardList, PlusCircle, Sparkles, Target, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -12,16 +12,14 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { handleGenerateFocusInsights } from '@/lib/actions';
+import { useTasks } from '@/contexts/tasks-context';
+import { handleAuditTaskAlignment } from '@/lib/actions';
+import type { AuditTaskAlignmentOutput } from '@/ai/flows/audit-task-alignment';
 import {
   buildActualTimeline,
-  buildFocusAuditResult,
-  buildFocusInsightFallback,
   buildPlanTimeline,
   FOCUS_AUDITOR_COLORS,
   FOCUS_AUDITOR_LABELS,
-  focusAuditorSampleLogsJson,
-  focusAuditorSamplePlan,
   minuteToTimeLabel,
   parseActivityLogJson,
   timeLabelToMinute,
@@ -30,14 +28,13 @@ import {
 } from '@/lib/focus-auditor-engine';
 import {
   loadFocusActivityLogs,
-  loadFocusAuditResult,
   loadFocusPlanBlocks,
   saveFocusActivityLogs,
   saveFocusAuditResult,
   saveFocusPlanBlocks,
 } from '@/lib/focus-auditor-storage';
 import { FocusClock } from '@/components/focus-auditor/focus-clock';
-import type { FocusActivityLogEntry, FocusAuditResult, FocusPlanBlock, FocusPlanType, FocusTimelineSegment } from '@/types/focus-auditor';
+import type { FocusActivityLogEntry, FocusPlanBlock, FocusPlanType, FocusTimelineSegment } from '@/types/focus-auditor';
 import { FOCUS_AUDITOR_PLAN_TYPES } from '@/types/focus-auditor';
 
 function createEmptyBlock(): FocusPlanBlock {
@@ -96,24 +93,33 @@ function TimelineStrip({ title, segments, emptyLabel }: { title: string; segment
 }
 
 export function FocusAuditorWorkspace() {
+  const { tasks } = useTasks();
   const [planBlocks, setPlanBlocks] = useState<FocusPlanBlock[]>([]);
   const [activityLogs, setActivityLogs] = useState<FocusActivityLogEntry[]>([]);
   const [activityJson, setActivityJson] = useState('');
-  const [auditResult, setAuditResult] = useState<FocusAuditResult | null>(null);
+  const [taskAuditResult, setTaskAuditResult] = useState<AuditTaskAlignmentOutput | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isGeneratingInsights, startInsightsTransition] = useTransition();
+  const [isAuditing, setIsAuditing] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     const storedPlan = loadFocusPlanBlocks();
     const storedLogs = loadFocusActivityLogs();
-    const storedResult = loadFocusAuditResult();
-
+    const storedResult = localStorage.getItem('focusWeave.focusAuditor.taskResult');
+ 
     setPlanBlocks(storedPlan);
     setActivityLogs(storedLogs);
     setActivityJson(storedLogs.length > 0 ? JSON.stringify(storedLogs, null, 2) : '');
-    setAuditResult(storedResult);
+    
+    if (storedResult) {
+      try {
+        setTaskAuditResult(JSON.parse(storedResult));
+      } catch (e) {
+        console.error("Failed to load task result");
+      }
+    }
+
     setIsLoaded(true);
   }, []);
 
@@ -143,24 +149,6 @@ export function FocusAuditorWorkspace() {
       return nextBlocks;
     });
   }
-
-  function loadSamplePlan() {
-    setPlanBlocks(focusAuditorSamplePlan);
-    saveFocusPlanBlocks(focusAuditorSamplePlan);
-    toast({
-      title: 'Sample plan loaded',
-      description: 'A full 24-hour sample routine has been added to the plan builder.',
-    });
-  }
-
-  function loadSampleLogs() {
-    setActivityJson(focusAuditorSampleLogsJson);
-    toast({
-      title: 'Sample logs loaded',
-      description: 'Review the JSON and import it to test the auditor.',
-    });
-  }
-
   function importLogs() {
     const parsed = parseActivityLogJson(activityJson);
     if (parsed.errors.length > 0) {
@@ -183,69 +171,76 @@ export function FocusAuditorWorkspace() {
   }
 
   async function runAudit() {
-    const planErrors = validateFocusPlanBlocks(planBlocks);
-    const logErrors = validateActivityLogs(activityLogs);
-    const errors = [...planErrors, ...logErrors];
-
-    if (errors.length > 0) {
-      setValidationErrors(errors);
+    if (!activityJson.trim()) {
       toast({
         variant: 'destructive',
-        title: 'Fix audit setup first',
-        description: errors[0],
+        title: 'No logs detected',
+        description: 'Please input your activity logs in the "Activity Logs" tab first.',
       });
       return;
     }
 
-    const baseResult = buildFocusAuditResult(planBlocks, activityLogs);
-    const fallbackInsights = buildFocusInsightFallback(baseResult);
-    const optimisticResult = { ...baseResult, insights: fallbackInsights };
+    const doneTasks = tasks.filter(t => t.status === 'done').map(t => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+    }));
 
+    if (doneTasks.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'No tasks to audit',
+        description: 'You need at least one task marked as "Done" to run this audit.',
+      });
+      return;
+    }
+
+    const parsed = parseActivityLogJson(activityJson);
+    if (parsed.errors.length > 0) {
+      setValidationErrors(parsed.errors);
+      return;
+    }
+
+    setIsAuditing(true);
     setValidationErrors([]);
-    setAuditResult(optimisticResult);
-    saveFocusAuditResult(optimisticResult);
 
-    toast({
-      title: 'Audit complete',
-      description: `Alignment score: ${optimisticResult.alignmentScore}/100.`,
-    });
+    try {
+      const result = await handleAuditTaskAlignment({
+        doneTasks,
+        activityLogs: parsed.entries.map(e => ({
+          id: e.id,
+          timestamp: e.timestamp,
+          duration: e.duration,
+          activity: e.activity
+        }))
+      });
 
-    startInsightsTransition(() => {
-      handleGenerateFocusInsights({
-        alignmentScore: baseResult.alignmentScore,
-        trackedMinutes: baseResult.trackedMinutes,
-        categoryBreakdown: baseResult.categoryBreakdown.map((item) => ({
-          label: item.label,
-          alignment: item.alignment,
-          trackedMinutes: item.trackedMinutes,
-        })),
-        topDeviations: baseResult.topDeviations.map((item) => ({
-          summary: item.summary,
-          pointImpact: item.pointImpact,
-          duration: item.duration,
-        })),
-      })
-        .then((insightResult) => {
-          const enrichedResult = { ...baseResult, insights: insightResult.insights };
-          setAuditResult(enrichedResult);
-          saveFocusAuditResult(enrichedResult);
-        })
-        .catch(() => {
-          setAuditResult(optimisticResult);
-          saveFocusAuditResult(optimisticResult);
-        });
-    });
+      setTaskAuditResult(result);
+      localStorage.setItem('focusWeave.focusAuditor.taskResult', JSON.stringify(result));
+      
+      toast({
+        title: 'Task Audit Complete',
+        description: `Your focus alignment is ${result.alignmentScore}%.`,
+      });
+    } catch (err) {
+      toast({
+        variant: 'destructive',
+        title: 'Audit Failed',
+        description: 'Failed to complete the AI semantic audit. Please try again.',
+      });
+    } finally {
+      setIsAuditing(false);
+    }
   }
 
   if (!isLoaded) {
     return <div className="rounded-2xl border border-border bg-card px-6 py-12 text-center text-muted-foreground">Loading Focus Auditor...</div>;
   }
 
-  const categoryChartData =
-    auditResult?.categoryBreakdown.map((item) => ({
-      name: item.label,
-      alignment: item.alignment,
-    })) ?? [];
+  const taskChartData = taskAuditResult?.taskBreakdown.map(item => ({
+    name: item.taskName,
+    minutes: item.actualMinutes,
+  })) || [];
 
   return (
     <div className="space-y-6">
@@ -256,7 +251,7 @@ export function FocusAuditorWorkspace() {
             Adaptive Focus Auditor
           </CardTitle>
           <CardDescription>
-            Define a personalized 24-hour rhythm, import timestamped activity logs, then compare plan versus reality minute by minute.
+            The Task-Based Auditor uses AI to semantically map your activity logs to your actual completed tasks, measuring true productivity over just staying busy.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -267,11 +262,13 @@ export function FocusAuditorWorkspace() {
             <Badge variant="secondary" className="px-3 py-1 text-xs">AI coaching insights</Badge>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button variant="outline" onClick={loadSamplePlan}>Load Sample Plan</Button>
-            <Button variant="outline" onClick={loadSampleLogs}>Load Sample Logs</Button>
-            <Button onClick={runAudit}>
-              <Target className="mr-2 h-4 w-4" />
-              Run Audit
+            <Button onClick={runAudit} disabled={isAuditing}>
+              {isAuditing ? (
+                <Sparkles className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Target className="mr-2 h-4 w-4" />
+              )}
+              {isAuditing ? 'Auditing...' : 'Run Task Audit'}
             </Button>
           </div>
         </CardContent>
@@ -294,7 +291,7 @@ export function FocusAuditorWorkspace() {
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="plan">Plan Builder</TabsTrigger>
           <TabsTrigger value="logs">Activity Logs</TabsTrigger>
-          <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="results">Audit Results</TabsTrigger>
         </TabsList>
 
         <TabsContent value="plan" className="space-y-6">
@@ -315,7 +312,7 @@ export function FocusAuditorWorkspace() {
               <CardContent className="space-y-4">
                 {planBlocks.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-border bg-muted/20 px-5 py-8 text-sm text-muted-foreground">
-                    No plan blocks yet. Add one manually or load the sample plan.
+                    No plan blocks yet. Add one manually using the button above.
                   </div>
                 ) : (
                   planBlocks.map((block) => (
@@ -372,7 +369,7 @@ export function FocusAuditorWorkspace() {
                 )}
               </CardContent>
             </Card>
-
+ 
             <FocusClock
               title="Planned Day Preview"
               subtitle="A circular view of your intended daily rhythm."
@@ -406,7 +403,6 @@ export function FocusAuditorWorkspace() {
                     <ClipboardList className="mr-2 h-4 w-4" />
                     Import Logs
                   </Button>
-                  <Button variant="outline" onClick={loadSampleLogs}>Paste Sample JSON</Button>
                 </div>
               </CardContent>
             </Card>
@@ -434,7 +430,7 @@ export function FocusAuditorWorkspace() {
                       {activityLogs.slice(0, 12).map((entry) => (
                         <div key={entry.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background px-3 py-2 text-sm">
                           <div>
-                            <p className="font-medium">{FOCUS_AUDITOR_LABELS[entry.activity]}</p>
+                            <p className="font-medium">{FOCUS_AUDITOR_LABELS[entry.activity] || entry.activity}</p>
                             <p className="text-xs text-muted-foreground">{entry.notes || 'No note added'}</p>
                           </div>
                           <div className="text-right">
@@ -452,137 +448,188 @@ export function FocusAuditorWorkspace() {
         </TabsContent>
 
         <TabsContent value="results" className="space-y-6">
-          {!auditResult ? (
+          {!taskAuditResult ? (
             <Card className="shadow-sm">
-              <CardContent className="flex min-h-[220px] flex-col items-center justify-center text-center">
-                <Target className="mb-4 h-10 w-10 text-primary" />
-                <h3 className="text-xl font-semibold">Run your first audit</h3>
+              <CardContent className="flex min-h-[300px] flex-col items-center justify-center text-center">
+                <Target className="mb-4 h-12 w-12 text-muted-foreground/30" />
+                <h3 className="text-xl font-semibold">Ready for Audit</h3>
                 <p className="mt-2 max-w-xl text-muted-foreground">
-                  Once you have a plan and imported activity logs, the Focus Auditor will generate an alignment score, deviations, timelines, and coaching insights here.
+                  The AI will compare your <strong>Done Tasks</strong> with your <strong>Activity Logs</strong>. 
+                  It semantically matches site names and descriptions to your task names to uncover your true focus alignment.
                 </p>
+                <div className="mt-6 flex flex-col items-center gap-2">
+                  <p className="text-sm font-medium">Requirements:</p>
+                  <ul className="text-xs text-muted-foreground space-y-1">
+                    <li className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${tasks.filter(t => t.status === 'done').length > 0 ? 'bg-green-500' : 'bg-red-500'}`} />
+                      At least one task marked as "Done"
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${activityLogs.length > 0 ? 'bg-green-500' : 'bg-red-500'}`} />
+                      Imported Activity Logs
+                    </li>
+                  </ul>
+                </div>
               </CardContent>
             </Card>
           ) : (
             <>
               <div className="grid gap-4 md:grid-cols-3">
-                <Card className="shadow-sm">
+                <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-card to-primary/5 shadow-md">
                   <CardHeader className="pb-2">
-                    <CardDescription>Alignment Score</CardDescription>
-                    <CardTitle className="text-4xl">{auditResult.alignmentScore}<span className="text-lg text-muted-foreground">/100</span></CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    {auditResult.earnedPoints.toFixed(1)} points earned across {auditResult.trackedMinutes} planned minutes.
-                  </CardContent>
-                </Card>
-                <Card className="shadow-sm">
-                  <CardHeader className="pb-2">
-                    <CardDescription>Tracked Blocks</CardDescription>
-                    <CardTitle className="text-4xl">{auditResult.categoryBreakdown.length}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    Personalized categories evaluated against your imported activity logs.
-                  </CardContent>
-                </Card>
-                <Card className="shadow-sm">
-                  <CardHeader className="pb-2">
-                    <CardDescription>Detected Deviations</CardDescription>
-                    <CardTitle className="text-4xl">{auditResult.deviations.length}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-sm text-muted-foreground">
-                    Biggest mismatches are grouped into contiguous time windows for easier review.
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-                <TimelineStrip
-                  title="Planned Timeline"
-                  segments={auditResult.planTimeline}
-                  emptyLabel="No planned timeline available."
-                />
-                <TimelineStrip
-                  title="Actual Timeline"
-                  segments={auditResult.actualTimeline}
-                  emptyLabel="No actual timeline available."
-                />
-              </div>
-
-              <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-                <Card className="shadow-sm">
-                  <CardHeader>
-                    <CardTitle>Per-Category Alignment</CardTitle>
-                    <CardDescription>
-                      See which planned blocks held up well and which ones drifted the most.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="h-[320px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={categoryChartData} layout="vertical" margin={{ left: 10, right: 24 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis type="number" domain={[0, 100]} />
-                        <YAxis type="category" dataKey="name" width={90} />
-                        <Bar dataKey="alignment" fill="hsl(var(--chart-1))" radius={[0, 6, 6, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card className="shadow-sm">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Sparkles className="h-5 w-5 text-primary" />
-                      Focus Insights
+                    <CardDescription>Overall Alignment</CardDescription>
+                    <CardTitle className="text-5xl font-extrabold tracking-tight">
+                      {taskAuditResult.alignmentScore}
+                      <span className="text-lg font-medium text-muted-foreground">%</span>
                     </CardTitle>
-                    <CardDescription>
-                      {isGeneratingInsights ? 'Refreshing AI coaching...' : 'AI-generated when available, with a rule-based fallback.'}
-                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-3">
-                    {auditResult.insights.map((insight) => (
-                      <div key={insight} className="rounded-2xl border border-primary/15 bg-primary/5 px-4 py-3 text-sm">
-                        {insight}
-                      </div>
-                    ))}
+                  <CardContent>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <div 
+                        className="h-full bg-primary transition-all duration-1000" 
+                        style={{ width: `${taskAuditResult.alignmentScore}%` }} 
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardDescription>Tracked Minutes</CardDescription>
+                    <CardTitle className="text-4xl font-bold">{taskAuditResult.totalTrackedMinutes}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    Total duration across all activity logs analyzed.
+                  </CardContent>
+                </Card>
+                <Card className="shadow-sm">
+                  <CardHeader className="pb-2">
+                    <CardDescription>Aligned Focus</CardDescription>
+                    <CardTitle className="text-4xl font-bold">{taskAuditResult.alignedMinutes}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    Minutes spent on activities that strongly match your done tasks.
                   </CardContent>
                 </Card>
               </div>
 
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <CardTitle>Deviation Report</CardTitle>
-                  <CardDescription>
-                    Exact mismatch windows with expected activity, actual activity, duration, and point impact.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {auditResult.deviations.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No deviations were detected. Your actual activity matched the plan throughout covered blocks.</p>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Time Range</TableHead>
-                          <TableHead>Expected</TableHead>
-                          <TableHead>Actual</TableHead>
-                          <TableHead>Duration</TableHead>
-                          <TableHead>Impact</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {auditResult.deviations.slice(0, 18).map((deviation) => (
-                          <TableRow key={deviation.id}>
-                            <TableCell>{minuteToTimeLabel(deviation.startMinute)}-{minuteToTimeLabel(deviation.endMinute)}</TableCell>
-                            <TableCell>{FOCUS_AUDITOR_LABELS[deviation.expected]}</TableCell>
-                            <TableCell>{FOCUS_AUDITOR_LABELS[deviation.actual]}</TableCell>
-                            <TableCell>{deviation.duration} min</TableCell>
-                            <TableCell>-{deviation.pointImpact.toFixed(1)}</TableCell>
+              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="space-y-6">
+                  <Card className="shadow-lg">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <ClipboardList className="h-5 w-5 text-primary" />
+                        Task Breakdown
+                      </CardTitle>
+                      <CardDescription>
+                        Semantic time allocation per completed task.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Task Name</TableHead>
+                            <TableHead className="text-right">Actual Time</TableHead>
+                            <TableHead className="text-right">Weight</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </CardContent>
-              </Card>
+                        </TableHeader>
+                        <TableBody>
+                          {taskAuditResult.taskBreakdown.map((item) => (
+                            <TableRow key={item.taskId} className="group transition-colors hover:bg-muted/30">
+                              <TableCell className="font-medium">{item.taskName}</TableCell>
+                              <TableCell className="text-right">{item.actualMinutes} min</TableCell>
+                              <TableCell className="text-right">
+                                <Badge variant="outline" className="font-mono">
+                                  {item.alignmentPercentage}%
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {taskAuditResult.unrelatedMinutes > 0 && (
+                            <TableRow className="bg-muted/20 italic">
+                              <TableCell>Unrelated/Distractions</TableCell>
+                              <TableCell className="text-right">{taskAuditResult.unrelatedMinutes} min</TableCell>
+                              <TableCell className="text-right">
+                                <Badge variant="secondary" className="text-muted-foreground">
+                                  {taskAuditResult.totalTrackedMinutes > 0 
+                                    ? Math.round((taskAuditResult.unrelatedMinutes / taskAuditResult.totalTrackedMinutes) * 100) 
+                                    : 0}%
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-md">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <BarChartIcon className="h-5 w-5 text-primary" />
+                        Time Distribution Graph
+                      </CardTitle>
+                      <CardDescription>
+                        Visual comparison of minutes spent per task category.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={taskChartData} layout="vertical" margin={{ left: 20, right: 30, top: 10 }}>
+                          <XAxis type="number" hide />
+                          <YAxis 
+                            dataKey="name" 
+                            type="category" 
+                            width={100} 
+                            tick={{ fill: 'currentColor', fontSize: 12 }}
+                          />
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                          <Bar 
+                            dataKey="minutes" 
+                            fill="hsl(var(--primary))" 
+                            radius={[0, 4, 4, 0]} 
+                            barSize={32}
+                            label={{ position: 'right', fill: 'currentColor', fontSize: 11, formatter: (val: number) => `${val}m` }}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="space-y-6">
+                  <Card className="border-primary/20 bg-primary/5 shadow-md">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-primary" />
+                        AI Coach Insights
+                      </CardTitle>
+                      <CardDescription>
+                        Deeper patterns identified by comparing your intent with actual behavior.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {taskAuditResult.insights.map((insight, idx) => (
+                        <div key={idx} className="flex gap-3">
+                          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white">
+                            {idx + 1}
+                          </div>
+                          <p className="text-sm leading-relaxed text-muted-foreground">
+                            {insight}
+                          </p>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+
+                  <FocusClock
+                    title="Actual Day Map"
+                    subtitle="Where your time actually went."
+                    segments={actualTimeline}
+                    emptyLabel="No logs to map."
+                  />
+                </div>
+              </div>
             </>
           )}
         </TabsContent>

@@ -21,7 +21,7 @@ export const FOCUS_AUDITOR_ACTIVITY_TYPES = [
 ] as const;
 
 export type FocusPlanType = (typeof FOCUS_AUDITOR_PLAN_TYPES)[number];
-export type FocusActivityType = (typeof FOCUS_AUDITOR_ACTIVITY_TYPES)[number];
+export type FocusActivityType = (typeof FOCUS_AUDITOR_ACTIVITY_TYPES)[number] | string;
 
 export interface FocusPlanBlock {
   id: string;

@@ -59,6 +59,12 @@ import {
   getRelevantNews as getRelevantNewsFlow,
 } from '@/ai/flows/get-relevant-news';
 
+import {
+  auditTaskAlignment as auditTaskAlignmentFlow,
+  type AuditTaskAlignmentInput,
+  type AuditTaskAlignmentOutput
+} from '@/ai/flows/audit-task-alignment';
+
 const LIFE_CATEGORY_DEFINITIONS: Array<{
   name: string;
   description: string;
@@ -305,6 +311,24 @@ export async function handleGenerateFocusInsights(
   } catch (error) {
     console.error('Error in handleGenerateFocusInsights:', error);
     throw new Error('Failed to generate focus insights. Please try again.');
+  }
+}
+
+export async function handleAuditTaskAlignment(
+  input: AuditTaskAlignmentInput
+): Promise<AuditTaskAlignmentOutput> {
+  try {
+    return await auditTaskAlignmentFlow(input);
+  } catch (error) {
+    console.error('Error in handleAuditTaskAlignment:', error);
+    return {
+      alignmentScore: 0,
+      totalTrackedMinutes: 0,
+      alignedMinutes: 0,
+      taskBreakdown: [],
+      unrelatedMinutes: 0,
+      insights: ["AI Audit service is currently experiencing issues. Please check your logs and try again later."]
+    };
   }
 }
 

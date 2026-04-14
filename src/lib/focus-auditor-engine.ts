@@ -12,7 +12,7 @@ import type {
 
 const MINUTES_PER_DAY = 24 * 60;
 
-export const FOCUS_AUDITOR_LABELS: Record<FocusPlanType | FocusActivityType, string> = {
+export const FOCUS_AUDITOR_LABELS: Record<string, string> = {
   focus: 'Focus',
   study: 'Study',
   work: 'Work',
@@ -264,11 +264,6 @@ export function parseActivityLogJson(rawJson: string): { entries: FocusActivityL
         notes: typeof record.notes === 'string' ? record.notes : undefined,
       };
     });
-
-    const invalidActivity = entries.find((entry) => !(entry.activity in FOCUS_AUDITOR_LABELS));
-    if (invalidActivity) {
-      return { entries: [], errors: [`Unsupported activity type "${invalidActivity.activity}".`] };
-    }
 
     return { entries, errors: validateActivityLogs(entries) };
   } catch (error) {
